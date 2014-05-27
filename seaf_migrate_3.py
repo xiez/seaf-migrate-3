@@ -10,7 +10,7 @@
 import os
 import stat
 import sys
-from seaserv import seafile_api
+from seaserv import seafile_api, get_group_repos_by_owner, list_inner_pub_repos_by_owner
 
 def count_files_recursive(repo_id, path='/'):
     num_files = 0
@@ -22,23 +22,44 @@ def count_files_recursive(repo_id, path='/'):
             num_files += 1
     return num_files
 
-from_repo_id = sys.argv[1]
-from_repo = seafile_api.get_repo(from_repo_id)
-username = seafile_api.get_repo_owner(from_repo_id)
-to_repo_id = seafile_api.create_repo(name=from_repo.name, desc=from_repo.desc,
-                                     username=username, passwd=None)
+origin_repo_id = sys.argv[1]
+origin_repo = seafile_api.get_repo(origin_repo_id)
+username = seafile_api.get_repo_owner(origin_repo_id)
+new_repo_id = seafile_api.create_repo(name=origin_repo.name+"-new", desc=origin_repo.desc, 
+                                      username=username, passwd=None)
 
-dirents = seafile_api.list_dir_by_path(from_repo_id, '/')
+dirents = seafile_api.list_dir_by_path(origin_repo_id, '/')
 for e in dirents:
     print "copying: " + e.obj_name
     obj_name = e.obj_name
-    seafile_api.copy_file(from_repo_id, '/', obj_name, to_repo_id, '/',
+    seafile_api.copy_file(origin_repo_id, '/', obj_name, new_repo_id, '/',
                           obj_name, username, 0, 1)
+
+#get the share info of the origin repo
+#used for share the new repo
+shared_repos = []
+shared_repos += seafile_api.get_share_out_repo_list(username, -1, -1)
+shared_repos += get_group_repos_by_owner(username)
+shared_repos += list_inner_pub_repos_by_owner(username)
+for repo in shared_repos:
+    if repo.repo_id != origin_repo_id:
+        continue
+
+    if repo.share_type == "personal":
+        #'username' share this repo to 'repo.user'
+        seafile_api.share_repo(new_repo_id, username, repo.user, repo.permission)
+
+    if repo.share_type == "group":
+        #'username' share this repo to group
+        seafile_api.group_share_repo(new_repo_id, repo.group_id, username, repo.permission)
+
+    if repo.share_type == "public":
+        seafile_api.add_inner_pub_repo(new_repo_id, repo.permission)
 
 print "*" * 60
 print "OK, verifying..."
 print "Origin library(%s): %d files. New Library(%s): %d files." % (
-    from_repo_id[:8], count_files_recursive(from_repo_id),
-    to_repo_id[:8], count_files_recursive(to_repo_id))
+    origin_repo_id[:8], count_files_recursive(origin_repo_id),
+    new_repo_id[:8], count_files_recursive(new_repo_id))
 print "*" * 60
 
